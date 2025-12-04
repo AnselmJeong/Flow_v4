@@ -215,7 +215,7 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
     goToPage(currentPage + (twoPageView ? 2 : 1))
   }, [currentPage, twoPageView, goToPage])
 
-  // Handle text selection with improved accuracy
+  // Handle text selection with validation - use browser default selection but verify continuity
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
     const selection = window.getSelection()
     if (!selection || selection.rangeCount === 0) return
@@ -225,32 +225,119 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
     
     if (!text) return
     
-    // Get the PDF page container to verify selection is within PDF
+    // Get the PDF page container
     const pdfContainer = e.currentTarget.closest('.pdf-page-wrapper')
     if (!pdfContainer) return
     
-    // Get mouse position relative to the page
-    const containerRect = pdfContainer.getBoundingClientRect()
-    const selectionRect = range.getBoundingClientRect()
+    // Get text content layer
+    const textContent = pdfContainer.querySelector('.react-pdf__Page__textContent')
+    if (!textContent) return
     
-    // Verify selection is actually within the PDF page bounds
-    // Allow small margin for edge cases
-    const margin = 5
-    const isWithinBounds = 
-      selectionRect.left >= containerRect.left - margin &&
-      selectionRect.right <= containerRect.right + margin &&
-      selectionRect.top >= containerRect.top - margin &&
-      selectionRect.bottom <= containerRect.bottom + margin
+    // Find all spans that are within the selection range
+    const allSpans = textContent.querySelectorAll('span')
+    const selectedSpans: Array<{ element: Element; rect: DOMRect; text: string }> = []
     
-    if (isWithinBounds) {
-      onTextSelect?.(text, {
-        x: selectionRect.left + selectionRect.width / 2,
-        y: selectionRect.bottom
+    allSpans.forEach((span) => {
+      const spanRect = span.getBoundingClientRect()
+      const selectionRect = range.getBoundingClientRect()
+      
+      // Check if span overlaps with selection (with small margin for edge cases)
+      const margin = 2
+      const overlaps = !(
+        spanRect.right < selectionRect.left - margin ||
+        spanRect.left > selectionRect.right + margin ||
+        spanRect.bottom < selectionRect.top - margin ||
+        spanRect.top > selectionRect.bottom + margin
+      )
+      
+      if (overlaps && span.textContent) {
+        selectedSpans.push({
+          element: span,
+          rect: spanRect,
+          text: span.textContent
+        })
+      }
+    })
+    
+    if (selectedSpans.length === 0) {
+      selection.removeAllRanges()
+      return
+    }
+    
+    // Sort spans by position (top to bottom, left to right)
+    selectedSpans.sort((a, b) => {
+      const yDiff = a.rect.top - b.rect.top
+      if (Math.abs(yDiff) > 5) { // Different lines (5px threshold)
+        return yDiff
+      }
+      return a.rect.left - b.rect.left // Same line, sort by x
+    })
+    
+    // Filter to only include continuous blocks
+    // Two spans are continuous if they're on the same line and close horizontally
+    const continuousSpans: typeof selectedSpans = []
+    const lineThreshold = 5 // pixels - consider same line if within this
+    
+    for (let i = 0; i < selectedSpans.length; i++) {
+      const current = selectedSpans[i]
+      
+      if (continuousSpans.length === 0) {
+        continuousSpans.push(current)
+        continue
+      }
+      
+      const last = continuousSpans[continuousSpans.length - 1]
+      const sameLine = Math.abs(current.rect.top - last.rect.top) < lineThreshold
+      const horizontalGap = current.rect.left - last.rect.right
+      
+      // Include if same line and reasonable gap (less than 3x average character width)
+      const avgCharWidth = last.rect.width / (last.text.length || 1)
+      const maxGap = Math.max(avgCharWidth * 3, 20) // At least 20px, or 3x char width
+      
+      if (sameLine && horizontalGap >= -5 && horizontalGap < maxGap) {
+        // Same line, reasonable gap - include
+        continuousSpans.push(current)
+      } else if (!sameLine) {
+        // New line - check if it's directly below the previous line
+        const verticalGap = current.rect.top - last.rect.bottom
+        const lineHeight = last.rect.height
+        if (verticalGap >= -2 && verticalGap < lineHeight * 1.5) {
+          // Directly below - include
+          continuousSpans.push(current)
+        } else {
+          // Too far - stop here (only use continuous blocks)
+          break
+        }
+      } else {
+        // Same line but gap too large - stop
+        break
+      }
+    }
+    
+    // Only use filtered result if it contains at least 50% of original spans
+    // This prevents selecting disconnected text blocks
+    const finalSpans = continuousSpans.length >= selectedSpans.length * 0.5 
+      ? continuousSpans 
+      : []
+    
+    if (finalSpans.length === 0) {
+      selection.removeAllRanges()
+      return
+    }
+    
+    // Build text from continuous spans
+    const finalText = finalSpans.map(s => s.text).join('').trim()
+    
+    if (finalText && finalText.length > 0) {
+      const finalRect = finalSpans[0].rect
+      
+      onTextSelect?.(finalText, {
+        x: finalRect.left + finalRect.width / 2,
+        y: finalRect.bottom
       })
     }
     
-    // Clear selection to prevent unwanted text from being selected
-    // This helps prevent accidental selection of text outside the intended area
+    // Clear selection after a short delay to show it was selected
     setTimeout(() => {
       selection.removeAllRanges()
     }, 100)
@@ -303,7 +390,7 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
         >
           <div className="pdf-pages">
             {pagesToRender.map((pageNum) => (
-              <div key={pageNum} className="pdf-page-wrapper">
+              <div key={pageNum} className="pdf-page-wrapper" data-page-number={pageNum}>
                 <Page
                   pageNumber={pageNum}
                   height={pageHeight}
@@ -412,10 +499,7 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
           line-height: 1.0;
           user-select: text !important;
           -webkit-user-select: text !important;
-          /* 정확한 정렬을 위한 추가 설정 */
           pointer-events: auto !important;
-          /* 텍스트 선택 정확도 개선 */
-          -webkit-touch-callout: default;
         }
 
         .pdf-page-wrapper .react-pdf__Page__textContent span {
@@ -426,12 +510,7 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
           cursor: text;
           user-select: text !important;
           -webkit-user-select: text !important;
-          /* 텍스트 선택 정확도 개선 */
           pointer-events: auto !important;
-          /* 부드러운 선택을 위한 설정 */
-          -webkit-touch-callout: default;
-          /* 텍스트 선택 시 정확한 범위 유지 */
-          display: inline-block;
         }
 
         .pdf-page-wrapper .react-pdf__Page__textContent span::selection {
