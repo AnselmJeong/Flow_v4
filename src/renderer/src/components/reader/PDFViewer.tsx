@@ -73,7 +73,7 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
     }
   }, [])
 
-  const twoPageView = settings?.pageView === 'double' ?? true
+  const twoPageView = (settings?.pageView ?? 'double') === 'double'
 
   const goToPage = useCallback((page: number) => {
     const validPage = Math.max(1, Math.min(page, numPages))
@@ -215,8 +215,8 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
     goToPage(currentPage + (twoPageView ? 2 : 1))
   }, [currentPage, twoPageView, goToPage])
 
-  // Handle text selection with validation - use browser default selection but verify continuity
-  const handleMouseUp = useCallback((e: React.MouseEvent) => {
+  // Handle text selection - use browser default selection
+  const handleMouseUp = useCallback(() => {
     const selection = window.getSelection()
     if (!selection || selection.rangeCount === 0) return
     
@@ -225,122 +225,14 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
     
     if (!text) return
     
-    // Get the PDF page container
-    const pdfContainer = e.currentTarget.closest('.pdf-page-wrapper')
-    if (!pdfContainer) return
+    // Get selection position
+    const rect = range.getBoundingClientRect()
     
-    // Get text content layer
-    const textContent = pdfContainer.querySelector('.react-pdf__Page__textContent')
-    if (!textContent) return
-    
-    // Find all spans that are within the selection range
-    const allSpans = textContent.querySelectorAll('span')
-    const selectedSpans: Array<{ element: Element; rect: DOMRect; text: string }> = []
-    
-    allSpans.forEach((span) => {
-      const spanRect = span.getBoundingClientRect()
-      const selectionRect = range.getBoundingClientRect()
-      
-      // Check if span overlaps with selection (with small margin for edge cases)
-      const margin = 2
-      const overlaps = !(
-        spanRect.right < selectionRect.left - margin ||
-        spanRect.left > selectionRect.right + margin ||
-        spanRect.bottom < selectionRect.top - margin ||
-        spanRect.top > selectionRect.bottom + margin
-      )
-      
-      if (overlaps && span.textContent) {
-        selectedSpans.push({
-          element: span,
-          rect: spanRect,
-          text: span.textContent
-        })
-      }
+    // Call onTextSelect with the selected text
+    onTextSelect?.(text, {
+      x: rect.left + rect.width / 2,
+      y: rect.bottom
     })
-    
-    if (selectedSpans.length === 0) {
-      selection.removeAllRanges()
-      return
-    }
-    
-    // Sort spans by position (top to bottom, left to right)
-    selectedSpans.sort((a, b) => {
-      const yDiff = a.rect.top - b.rect.top
-      if (Math.abs(yDiff) > 5) { // Different lines (5px threshold)
-        return yDiff
-      }
-      return a.rect.left - b.rect.left // Same line, sort by x
-    })
-    
-    // Filter to only include continuous blocks
-    // Two spans are continuous if they're on the same line and close horizontally
-    const continuousSpans: typeof selectedSpans = []
-    const lineThreshold = 5 // pixels - consider same line if within this
-    
-    for (let i = 0; i < selectedSpans.length; i++) {
-      const current = selectedSpans[i]
-      
-      if (continuousSpans.length === 0) {
-        continuousSpans.push(current)
-        continue
-      }
-      
-      const last = continuousSpans[continuousSpans.length - 1]
-      const sameLine = Math.abs(current.rect.top - last.rect.top) < lineThreshold
-      const horizontalGap = current.rect.left - last.rect.right
-      
-      // Include if same line and reasonable gap (less than 3x average character width)
-      const avgCharWidth = last.rect.width / (last.text.length || 1)
-      const maxGap = Math.max(avgCharWidth * 3, 20) // At least 20px, or 3x char width
-      
-      if (sameLine && horizontalGap >= -5 && horizontalGap < maxGap) {
-        // Same line, reasonable gap - include
-        continuousSpans.push(current)
-      } else if (!sameLine) {
-        // New line - check if it's directly below the previous line
-        const verticalGap = current.rect.top - last.rect.bottom
-        const lineHeight = last.rect.height
-        if (verticalGap >= -2 && verticalGap < lineHeight * 1.5) {
-          // Directly below - include
-          continuousSpans.push(current)
-        } else {
-          // Too far - stop here (only use continuous blocks)
-          break
-        }
-      } else {
-        // Same line but gap too large - stop
-        break
-      }
-    }
-    
-    // Only use filtered result if it contains at least 50% of original spans
-    // This prevents selecting disconnected text blocks
-    const finalSpans = continuousSpans.length >= selectedSpans.length * 0.5 
-      ? continuousSpans 
-      : []
-    
-    if (finalSpans.length === 0) {
-      selection.removeAllRanges()
-      return
-    }
-    
-    // Build text from continuous spans
-    const finalText = finalSpans.map(s => s.text).join('').trim()
-    
-    if (finalText && finalText.length > 0) {
-      const finalRect = finalSpans[0].rect
-      
-      onTextSelect?.(finalText, {
-        x: finalRect.left + finalRect.width / 2,
-        y: finalRect.bottom
-      })
-    }
-    
-    // Clear selection after a short delay to show it was selected
-    setTimeout(() => {
-      selection.removeAllRanges()
-    }, 100)
   }, [onTextSelect])
 
   // Keyboard navigation
