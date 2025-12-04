@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import ePub, { Book, Rendition, Contents } from 'epubjs'
-import type { TocItem } from '@shared/types'
+import type { TocItem, ReaderSettings, SearchResult } from '@shared/types'
 
 interface EPUBViewerProps {
   filePath: string
@@ -8,10 +8,12 @@ interface EPUBViewerProps {
   onLocationChange?: (location: string, page: number, totalPages: number) => void
   onTextSelect?: (text: string, position: { x: number; y: number }) => void
   onTocLoad?: (toc: TocItem[]) => void
+  settings?: ReaderSettings
 }
 
 export interface EPUBViewerRef {
   goToLocation: (href: string) => void
+  search: (query: string) => Promise<SearchResult[]>
 }
 
 // epubjs의 NavItem 타입
@@ -37,7 +39,8 @@ export const EPUBViewer = forwardRef<EPUBViewerRef, EPUBViewerProps>(function EP
   initialLocation,
   onLocationChange,
   onTextSelect,
-  onTocLoad
+  onTocLoad,
+  settings
 }, ref) {
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
@@ -53,10 +56,29 @@ export const EPUBViewer = forwardRef<EPUBViewerRef, EPUBViewerProps>(function EP
     renditionRef.current?.display(href)
   }, [])
 
-  // Expose goToLocation to parent via ref
+  // Search function using epubjs's built-in search
+  const searchInEPUB = useCallback(async (query: string): Promise<SearchResult[]> => {
+    if (!bookRef.current) return []
+
+    try {
+      const results = await bookRef.current.search(query)
+      return results.map((result: { cfi: string; excerpt: string }, index: number) => ({
+        id: `epub-search-${index}`,
+        text: query,
+        cfi: result.cfi,
+        excerpt: result.excerpt || query
+      }))
+    } catch (error) {
+      console.error('EPUB search error:', error)
+      return []
+    }
+  }, [])
+
+  // Expose functions to parent via ref
   useImperativeHandle(ref, () => ({
-    goToLocation
-  }), [goToLocation])
+    goToLocation,
+    search: searchInEPUB
+  }), [goToLocation, searchInEPUB])
 
   // Initialize EPUB
   useEffect(() => {
@@ -84,21 +106,27 @@ export const EPUBViewer = forwardRef<EPUBViewerRef, EPUBViewerProps>(function EP
         const tocItems = convertNavToTocItems(toc)
         onTocLoad?.(tocItems)
 
-        // Create rendition with two-page spread
+        // Create rendition with page view setting
+        const spreadMode = settings?.pageView === 'single' ? 'none' : 'always'
         const rendition = book.renderTo(viewerRef.current, {
           width: '100%',
           height: '100%',
-          spread: 'always',
+          spread: spreadMode,
           flow: 'paginated'
         })
         renditionRef.current = rendition
 
-        // Set up themes
+        // Apply font settings
+        const fontFamily = settings?.fontFamily === 'System Default' 
+          ? "'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif"
+          : settings?.fontFamily || "'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif"
+        
         rendition.themes.default({
           'body': {
-            'font-family': "'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif",
-            'font-size': '16px',
-            'line-height': '1.6',
+            'font-family': fontFamily,
+            'font-size': `${settings?.fontSize || 16}px`,
+            'font-weight': settings?.fontWeight || 400,
+            'line-height': settings?.lineHeight || 1.5,
             'color': '#333'
           },
           'p': {
@@ -161,7 +189,32 @@ export const EPUBViewer = forwardRef<EPUBViewerRef, EPUBViewerProps>(function EP
         bookRef.current = null
       }
     }
-  }, [filePath, initialLocation, onLocationChange, onTextSelect, onTocLoad])
+  }, [filePath, initialLocation, onLocationChange, onTextSelect, onTocLoad, settings])
+
+  // Update theme when settings change
+  useEffect(() => {
+    if (!renditionRef.current || !settings) return
+
+    const fontFamily = settings.fontFamily === 'System Default' 
+      ? "'SF Pro Text', -apple-system, BlinkMacSystemFont, sans-serif"
+      : settings.fontFamily
+
+    renditionRef.current.themes.default({
+      'body': {
+        'font-family': fontFamily,
+        'font-size': `${settings.fontSize}px`,
+        'font-weight': settings.fontWeight,
+        'line-height': settings.lineHeight,
+        'color': '#333'
+      },
+      'p': {
+        'margin-bottom': '1em'
+      }
+    })
+
+    // Update spread mode
+    renditionRef.current.spread(settings.pageView === 'single' ? 'none' : 'always')
+  }, [settings])
 
   // Navigation functions
   const goToPrev = useCallback(() => {

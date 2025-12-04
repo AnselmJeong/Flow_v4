@@ -45,6 +45,24 @@ export interface TocItem {
   children?: TocItem[]
 }
 
+// Reader settings (EPUB only)
+export interface ReaderSettings {
+  pageView: 'single' | 'double'
+  fontFamily: string
+  fontSize: number
+  fontWeight: number
+  lineHeight: number
+}
+
+// Search result types
+export interface SearchResult {
+  id: string
+  text: string
+  pageNumber?: number  // PDF용
+  cfi?: string         // EPUB용
+  excerpt: string      // 주변 텍스트 미리보기
+}
+
 // IPC Channel names
 export const IPC_CHANNELS = {
   // File operations

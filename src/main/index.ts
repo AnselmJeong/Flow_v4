@@ -152,12 +152,22 @@ app.whenReady().then(() => {
         throw new Error('세션을 찾을 수 없습니다.')
       }
 
+      // Validate baseContext
+      if (!session.baseContext || session.baseContext.trim().length === 0) {
+        console.error('baseContext is empty for session:', sessionId)
+        throw new Error('선택된 텍스트가 없습니다. 텍스트를 선택한 후 다시 시도해주세요.')
+      }
+
       // Get chat history
       const messages = getChatMessages(sessionId)
       const chatHistory = messages.map(m => ({
         role: m.role,
         message: m.message
       }))
+
+      console.log('Calling Gemini API with baseContext length:', session.baseContext.length)
+      console.log('User message:', userMessage)
+      console.log('Chat history length:', chatHistory.length)
 
       // Call Gemini API
       const response = await callGeminiAPI(session.baseContext, userMessage, chatHistory)

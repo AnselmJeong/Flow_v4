@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import type { PDFDocumentProxy } from 'pdfjs-dist'
-import type { TocItem } from '@shared/types'
+import type { TocItem, ReaderSettings, SearchResult } from '@shared/types'
 
 // 1. Worker 설정 (필수) - 로컬 파일 사용 (Electron 앱용)
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
@@ -16,11 +16,12 @@ interface PDFViewerProps {
   onPageChange?: (page: number, totalPages: number) => void
   onTextSelect?: (text: string, position: { x: number; y: number }) => void
   onTocLoad?: (toc: TocItem[]) => void
-  twoPageView?: boolean
+  settings?: ReaderSettings
 }
 
 export interface PDFViewerRef {
   goToPage: (page: number) => void
+  search: (query: string) => Promise<SearchResult[]>
 }
 
 // PDF outline item 타입
@@ -36,7 +37,7 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
   onPageChange,
   onTextSelect,
   onTocLoad,
-  twoPageView = true
+  settings
 }, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
   const pdfDocRef = useRef<unknown>(null)
@@ -72,6 +73,8 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
     }
   }, [])
 
+  const twoPageView = settings?.pageView === 'double' ?? true
+
   const goToPage = useCallback((page: number) => {
     const validPage = Math.max(1, Math.min(page, numPages))
     // In two-page view, ensure we start on odd page
@@ -80,10 +83,51 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
     onPageChange?.(adjustedPage, numPages)
   }, [numPages, twoPageView, onPageChange])
 
-  // Expose goToPage to parent via ref
+  // Search function
+  const searchInPDF = useCallback(async (query: string): Promise<SearchResult[]> => {
+    if (!pdfDocRef.current) return []
+
+    const pdf = pdfDocRef.current as PDFDocumentProxy
+    const results: SearchResult[] = []
+    const searchRegex = new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+
+    try {
+      for (let pageNum = 1; pageNum <= pdf.numPages; pageNum++) {
+        const page = await pdf.getPage(pageNum)
+        const textContent = await page.getTextContent()
+        
+        // Combine all text items
+        const fullText = textContent.items
+          .map((item: { str?: string }) => item.str || '')
+          .join(' ')
+
+        // Find all matches
+        let match
+        while ((match = searchRegex.exec(fullText)) !== null) {
+          const start = Math.max(0, match.index - 50)
+          const end = Math.min(fullText.length, match.index + match[0].length + 50)
+          const excerpt = fullText.substring(start, end).trim()
+          
+          results.push({
+            id: `pdf-search-${pageNum}-${results.length}`,
+            text: match[0],
+            pageNumber: pageNum,
+            excerpt: excerpt || match[0]
+          })
+        }
+      }
+    } catch (error) {
+      console.error('PDF search error:', error)
+    }
+
+    return results
+  }, [])
+
+  // Expose functions to parent via ref
   useImperativeHandle(ref, () => ({
-    goToPage
-  }), [goToPage])
+    goToPage,
+    search: searchInPDF
+  }), [goToPage, searchInPDF])
 
   // Convert PDF outline to TocItem format
   const convertOutlineToTocItems = useCallback(async (
@@ -171,19 +215,45 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
     goToPage(currentPage + (twoPageView ? 2 : 1))
   }, [currentPage, twoPageView, goToPage])
 
-  // Handle text selection
-  const handleMouseUp = useCallback(() => {
+  // Handle text selection with improved accuracy
+  const handleMouseUp = useCallback((e: React.MouseEvent) => {
     const selection = window.getSelection()
-    if (selection && selection.toString().trim()) {
-      const text = selection.toString().trim()
-      const range = selection.getRangeAt(0)
-      const rect = range.getBoundingClientRect()
-      
+    if (!selection || selection.rangeCount === 0) return
+    
+    const range = selection.getRangeAt(0)
+    const text = selection.toString().trim()
+    
+    if (!text) return
+    
+    // Get the PDF page container to verify selection is within PDF
+    const pdfContainer = e.currentTarget.closest('.pdf-page-wrapper')
+    if (!pdfContainer) return
+    
+    // Get mouse position relative to the page
+    const containerRect = pdfContainer.getBoundingClientRect()
+    const selectionRect = range.getBoundingClientRect()
+    
+    // Verify selection is actually within the PDF page bounds
+    // Allow small margin for edge cases
+    const margin = 5
+    const isWithinBounds = 
+      selectionRect.left >= containerRect.left - margin &&
+      selectionRect.right <= containerRect.right + margin &&
+      selectionRect.top >= containerRect.top - margin &&
+      selectionRect.bottom <= containerRect.bottom + margin
+    
+    if (isWithinBounds) {
       onTextSelect?.(text, {
-        x: rect.left + rect.width / 2,
-        y: rect.bottom
+        x: selectionRect.left + selectionRect.width / 2,
+        y: selectionRect.bottom
       })
     }
+    
+    // Clear selection to prevent unwanted text from being selected
+    // This helps prevent accidental selection of text outside the intended area
+    setTimeout(() => {
+      selection.removeAllRanges()
+    }, 100)
   }, [onTextSelect])
 
   // Keyboard navigation
@@ -342,6 +412,10 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
           line-height: 1.0;
           user-select: text !important;
           -webkit-user-select: text !important;
+          /* 정확한 정렬을 위한 추가 설정 */
+          pointer-events: auto !important;
+          /* 텍스트 선택 정확도 개선 */
+          -webkit-touch-callout: default;
         }
 
         .pdf-page-wrapper .react-pdf__Page__textContent span {
@@ -352,6 +426,12 @@ export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFVi
           cursor: text;
           user-select: text !important;
           -webkit-user-select: text !important;
+          /* 텍스트 선택 정확도 개선 */
+          pointer-events: auto !important;
+          /* 부드러운 선택을 위한 설정 */
+          -webkit-touch-callout: default;
+          /* 텍스트 선택 시 정확한 범위 유지 */
+          display: inline-block;
         }
 
         .pdf-page-wrapper .react-pdf__Page__textContent span::selection {

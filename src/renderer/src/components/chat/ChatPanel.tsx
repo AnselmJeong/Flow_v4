@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { PaperAirplaneIcon, Cog6ToothIcon, PlusIcon } from '@heroicons/react/24/outline'
+import ReactMarkdown from 'react-markdown'
 import type { ChatSession, ChatMessage } from '@shared/types'
 
 interface ChatPanelProps {
@@ -202,7 +203,13 @@ export function ChatPanel({
                 key={message.id}
                 className={`message ${message.role}`}
               >
-                <div className="message-content">{message.message}</div>
+                <div className="message-content">
+                  {message.role === 'assistant' ? (
+                    <ReactMarkdown className="markdown-content">{message.message}</ReactMarkdown>
+                  ) : (
+                    <div>{message.message}</div>
+                  )}
+                </div>
                 <div className="message-time">{formatDate(message.createdAt)}</div>
               </div>
             ))}
@@ -244,11 +251,11 @@ export function ChatPanel({
 
       <style>{`
         .chat-panel {
-          width: var(--chat-panel-width);
+          width: 100%;
+          height: 100%;
           display: flex;
           flex-direction: column;
           background-color: var(--color-bg-secondary);
-          border-left: 1px solid var(--color-border);
         }
 
         .chat-header {
@@ -424,6 +431,115 @@ export function ChatPanel({
           background-color: var(--color-bg-primary);
           border: 1px solid var(--color-border);
           border-bottom-left-radius: 4px;
+        }
+
+        .markdown-content {
+          word-wrap: break-word;
+        }
+
+        .markdown-content p {
+          margin: 0.5em 0;
+        }
+
+        .markdown-content p:first-child {
+          margin-top: 0;
+        }
+
+        .markdown-content p:last-child {
+          margin-bottom: 0;
+        }
+
+        .markdown-content code {
+          background-color: var(--color-bg-tertiary);
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 0.9em;
+          font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+
+        .markdown-content pre {
+          background-color: var(--color-bg-tertiary);
+          padding: var(--spacing-sm);
+          border-radius: 6px;
+          overflow-x: auto;
+          margin: 0.5em 0;
+        }
+
+        .markdown-content pre code {
+          background-color: transparent;
+          padding: 0;
+        }
+
+        .markdown-content ul,
+        .markdown-content ol {
+          margin: 0.5em 0;
+          padding-left: 1.5em;
+        }
+
+        .markdown-content li {
+          margin: 0.25em 0;
+        }
+
+        .markdown-content strong {
+          font-weight: 600;
+        }
+
+        .markdown-content em {
+          font-style: italic;
+        }
+
+        .markdown-content a {
+          color: var(--color-accent);
+          text-decoration: underline;
+        }
+
+        .markdown-content h1,
+        .markdown-content h2,
+        .markdown-content h3,
+        .markdown-content h4,
+        .markdown-content h5,
+        .markdown-content h6 {
+          margin: 0.75em 0 0.5em 0;
+          font-weight: 600;
+        }
+
+        .markdown-content h1:first-child,
+        .markdown-content h2:first-child,
+        .markdown-content h3:first-child,
+        .markdown-content h4:first-child,
+        .markdown-content h5:first-child,
+        .markdown-content h6:first-child {
+          margin-top: 0;
+        }
+
+        .markdown-content blockquote {
+          border-left: 3px solid var(--color-border);
+          padding-left: var(--spacing-sm);
+          margin: 0.5em 0;
+          color: var(--color-text-secondary);
+        }
+
+        .markdown-content hr {
+          border: none;
+          border-top: 1px solid var(--color-border);
+          margin: 1em 0;
+        }
+
+        .markdown-content table {
+          border-collapse: collapse;
+          width: 100%;
+          margin: 0.5em 0;
+        }
+
+        .markdown-content th,
+        .markdown-content td {
+          border: 1px solid var(--color-border);
+          padding: 0.5em;
+        }
+
+        .markdown-content th {
+          background-color: var(--color-bg-tertiary);
+          font-weight: 600;
         }
 
         .message-time {

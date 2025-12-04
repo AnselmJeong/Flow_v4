@@ -3,23 +3,28 @@ import { XMarkIcon } from '@heroicons/react/24/outline'
 import { PDFViewer, EPUBViewer } from '../components/reader'
 import type { PDFViewerRef, EPUBViewerRef } from '../components/reader'
 import { SelectionBubble } from '../components/ui/SelectionBubble'
+import { ResizableSplitter } from '../components/ui/ResizableSplitter'
 import { ChatPanel } from '../components/chat/ChatPanel'
-import type { Book, ChatSession, TocItem } from '@shared/types'
+import type { Book, ChatSession, TocItem, ReaderSettings, SearchResult } from '@shared/types'
 
 interface ReaderViewProps {
   book: Book
   onBack: () => void
   onTocLoad?: (toc: TocItem[]) => void
+  settings?: ReaderSettings
 }
 
 export interface ReaderViewRef {
   navigateToTocItem: (item: TocItem) => void
+  navigateToSearchResult: (result: SearchResult) => void
+  search: (query: string) => Promise<SearchResult[]>
 }
 
 export const ReaderView = forwardRef<ReaderViewRef, ReaderViewProps>(function ReaderView({ 
   book, 
   onBack,
-  onTocLoad
+  onTocLoad,
+  settings
 }, ref) {
   const pdfViewerRef = useRef<PDFViewerRef>(null)
   const epubViewerRef = useRef<EPUBViewerRef>(null)
@@ -39,10 +44,31 @@ export const ReaderView = forwardRef<ReaderViewRef, ReaderViewProps>(function Re
     }
   }, [book.fileType])
 
-  // Expose navigation function to parent
+  // Navigate to search result
+  const navigateToSearchResult = useCallback((result: SearchResult) => {
+    if (book.fileType === 'pdf' && result.pageNumber) {
+      pdfViewerRef.current?.goToPage(result.pageNumber)
+    } else if (book.fileType === 'epub' && result.cfi) {
+      epubViewerRef.current?.goToLocation(result.cfi)
+    }
+  }, [book.fileType])
+
+  // Search function
+  const search = useCallback(async (query: string): Promise<SearchResult[]> => {
+    if (book.fileType === 'pdf') {
+      return pdfViewerRef.current?.search(query) || []
+    } else if (book.fileType === 'epub') {
+      return epubViewerRef.current?.search(query) || []
+    }
+    return []
+  }, [book.fileType])
+
+  // Expose functions to parent
   useImperativeHandle(ref, () => ({
-    navigateToTocItem
-  }), [navigateToTocItem])
+    navigateToTocItem,
+    navigateToSearchResult,
+    search
+  }), [navigateToTocItem, navigateToSearchResult, search])
 
   const handlePageChange = useCallback((page: number, total: number) => {
     setCurrentPage(page)
@@ -60,15 +86,17 @@ export const ReaderView = forwardRef<ReaderViewRef, ReaderViewProps>(function Re
   }, [onTocLoad])
 
   const handleSummarize = useCallback(async (text: string) => {
+    if (!text || text.trim().length === 0) return
     const session = await window.api.createChatSession(book.id, text)
-    setChatInput('이 텍스트를 요약해주세요.')
+    setChatInput('선택된 텍스트를 핵심을 알기 쉽게 요약해주세요.')
     setSelectedText(null)
     setSelectedSession(session)
   }, [book.id])
 
   const handleTranslate = useCallback(async (text: string) => {
+    if (!text || text.trim().length === 0) return
     const session = await window.api.createChatSession(book.id, text)
-    setChatInput('이 텍스트를 한국어로 번역해주세요.')
+    setChatInput('선택된 텍스트를 한국어로 번역해주세요.')
     setSelectedText(null)
     setSelectedSession(session)
   }, [book.id])
@@ -93,76 +121,86 @@ export const ReaderView = forwardRef<ReaderViewRef, ReaderViewProps>(function Re
 
   return (
     <div className="reader-view">
-      {/* Reader Area */}
-      <div className="reader-area">
-        <header className="reader-header">
-          <div className="reader-tabs">
-            <div className="reader-tab active">
-              <span className="tab-icon">📄</span>
-              <span className="tab-title">{book.title}</span>
-              <button className="tab-close" onClick={onBack}>
-                <XMarkIcon className="close-icon" />
-              </button>
+      <ResizableSplitter
+        left={
+          <div className="reader-area">
+            <header className="reader-header">
+              <div className="reader-tabs">
+                <div className="reader-tab active">
+                  <span className="tab-icon">📄</span>
+                  <span className="tab-title">{book.title}</span>
+                  <button className="tab-close" onClick={onBack}>
+                    <XMarkIcon className="close-icon" />
+                  </button>
+                </div>
+              </div>
+              <div className="reader-page-info">
+                {currentPage} / {totalPages || '?'}
+              </div>
+            </header>
+
+            <div className="reader-content">
+              {book.fileType === 'pdf' ? (
+                <PDFViewer
+                  ref={pdfViewerRef}
+                  filePath={book.filePath}
+                  initialPage={currentPage}
+                  onPageChange={handlePageChange}
+                  onTextSelect={handleTextSelect}
+                  onTocLoad={handleTocLoad}
+                  settings={settings}
+                />
+              ) : book.fileType === 'epub' ? (
+                <EPUBViewer
+                  ref={epubViewerRef}
+                  filePath={book.filePath}
+                  onLocationChange={(_, page, total) => handlePageChange(page, total)}
+                  onTextSelect={handleTextSelect}
+                  onTocLoad={handleTocLoad}
+                  settings={settings}
+                />
+              ) : (
+                <div className="reader-placeholder">
+                  <p>Unsupported file type: {book.fileType}</p>
+                </div>
+              )}
+
+              {/* Floating selection bubble */}
+              {selectedText && (
+                <SelectionBubble
+                  text={selectedText.text}
+                  position={selectedText.position}
+                  onSummarize={handleSummarize}
+                  onTranslate={handleTranslate}
+                  onAsk={handleAsk}
+                  onClose={handleCloseSelection}
+                />
+              )}
             </div>
+
+            <footer className="reader-footer">
+              <span className="footer-file">{book.filePath.split('/').pop()}</span>
+              <span className="footer-progress">
+                {totalPages ? `${Math.round((currentPage / totalPages) * 100)}%` : '-'}
+              </span>
+            </footer>
           </div>
-          <div className="reader-page-info">
-            {currentPage} / {totalPages || '?'}
-          </div>
-        </header>
-
-        <div className="reader-content">
-          {book.fileType === 'pdf' ? (
-            <PDFViewer
-              ref={pdfViewerRef}
-              filePath={book.filePath}
-              initialPage={currentPage}
-              onPageChange={handlePageChange}
-              onTextSelect={handleTextSelect}
-              onTocLoad={handleTocLoad}
-              twoPageView={true}
-            />
-          ) : book.fileType === 'epub' ? (
-            <EPUBViewer
-              ref={epubViewerRef}
-              filePath={book.filePath}
-              onLocationChange={(_, page, total) => handlePageChange(page, total)}
-              onTextSelect={handleTextSelect}
-              onTocLoad={handleTocLoad}
-            />
-          ) : (
-            <div className="reader-placeholder">
-              <p>Unsupported file type: {book.fileType}</p>
-            </div>
-          )}
-
-          {/* Floating selection bubble */}
-          {selectedText && (
-            <SelectionBubble
-              text={selectedText.text}
-              position={selectedText.position}
-              onSummarize={handleSummarize}
-              onTranslate={handleTranslate}
-              onAsk={handleAsk}
-              onClose={handleCloseSelection}
-            />
-          )}
-        </div>
-
-        <footer className="reader-footer">
-          <span className="footer-file">{book.filePath.split('/').pop()}</span>
-          <span className="footer-progress">
-            {totalPages ? `${Math.round((currentPage / totalPages) * 100)}%` : '-'}
-          </span>
-        </footer>
-      </div>
-
-      {/* Chat Panel */}
-      <ChatPanel
-        bookId={book.id}
-        selectedSession={selectedSession}
-        onSessionSelect={handleSessionSelect}
-        initialMessage={chatInput}
-        onClearInitialMessage={handleClearInitialMessage}
+        }
+        right={
+          <ChatPanel
+            bookId={book.id}
+            selectedSession={selectedSession}
+            onSessionSelect={handleSessionSelect}
+            initialMessage={chatInput}
+            onClearInitialMessage={handleClearInitialMessage}
+          />
+        }
+        initialLeftWidth={70}
+        minLeftWidth={30}
+        maxLeftWidth={90}
+        minRightWidth={20}
+        maxRightWidth={70}
+        direction="horizontal"
       />
 
       <style>{`
@@ -173,7 +211,8 @@ export const ReaderView = forwardRef<ReaderViewRef, ReaderViewProps>(function Re
         }
         
         .reader-area {
-          flex: 1;
+          width: 100%;
+          height: 100%;
           display: flex;
           flex-direction: column;
           background-color: var(--color-bg-primary);

@@ -1,9 +1,6 @@
 import { 
   ListBulletIcon, 
   MagnifyingGlassIcon,
-  UnderlineIcon,
-  PhotoIcon,
-  ChartBarIcon,
   LanguageIcon,
   SunIcon,
   MoonIcon,
@@ -12,26 +9,37 @@ import {
 
 interface IconSidebarProps {
   onToggleToc: () => void
+  onToggleSearch: () => void
+  onToggleTypography: () => void
   onToggleTheme: () => void
   onSettings: () => void
   theme: 'light' | 'dark'
+  activePanel?: 'toc' | 'search' | 'typography' | null
 }
 
 const iconButtons = [
   { id: 'toc', icon: ListBulletIcon, label: 'Table of Contents' },
   { id: 'search', icon: MagnifyingGlassIcon, label: 'Search' },
-  { id: 'underline', icon: UnderlineIcon, label: 'Highlights' },
-  { id: 'images', icon: PhotoIcon, label: 'Images' },
-  { id: 'chart', icon: ChartBarIcon, label: 'Statistics' },
-  { id: 'font', icon: LanguageIcon, label: 'Font Settings' },
+  { id: 'typography', icon: LanguageIcon, label: 'Font Settings' },
 ]
 
-export function IconSidebar({ onToggleToc, onToggleTheme, onSettings, theme }: IconSidebarProps) {
+export function IconSidebar({ 
+  onToggleToc, 
+  onToggleSearch,
+  onToggleTypography,
+  onToggleTheme, 
+  onSettings, 
+  theme,
+  activePanel
+}: IconSidebarProps) {
   const handleClick = (id: string) => {
     if (id === 'toc') {
       onToggleToc()
+    } else if (id === 'search') {
+      onToggleSearch()
+    } else if (id === 'typography') {
+      onToggleTypography()
     }
-    // Other handlers will be added later
   }
 
   return (
@@ -40,7 +48,7 @@ export function IconSidebar({ onToggleToc, onToggleTheme, onSettings, theme }: I
         {iconButtons.map(({ id, icon: Icon, label }) => (
           <button 
             key={id}
-            className="icon-button"
+            className={`icon-button ${activePanel === id ? 'active' : ''}`}
             onClick={() => handleClick(id)}
             title={label}
             aria-label={label}
@@ -109,6 +117,11 @@ export function IconSidebar({ onToggleToc, onToggleTheme, onSettings, theme }: I
           background-color: var(--color-bg-tertiary);
           color: var(--color-text-primary);
         }
+
+        .icon-button.active {
+          background-color: var(--color-accent);
+          color: white;
+        }
         
         .icon-button:active {
           transform: scale(0.95);
@@ -122,4 +135,3 @@ export function IconSidebar({ onToggleToc, onToggleTheme, onSettings, theme }: I
     </aside>
   )
 }
-
