@@ -1,19 +1,22 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { IconSidebar } from './components/layout/IconSidebar'
 import { TOCPanel } from './components/layout/TOCPanel'
-import { LibraryView } from './views/LibraryView'
-import { ReaderView } from './views/ReaderView'
+import { LibraryView, ReaderView } from './views'
+import type { ReaderViewRef } from './views'
 import { SettingsModal } from './components/settings/SettingsModal'
-import type { Book } from '@shared/types'
+import type { Book, TocItem } from '@shared/types'
 
 type View = 'library' | 'reader'
 
 function App() {
+  const readerRef = useRef<ReaderViewRef>(null)
+  
   const [currentView, setCurrentView] = useState<View>('library')
   const [selectedBook, setSelectedBook] = useState<Book | null>(null)
   const [isTocOpen, setIsTocOpen] = useState(true)
   const [theme, setTheme] = useState<'light' | 'dark'>('light')
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [tocItems, setTocItems] = useState<TocItem[]>([])
 
   // Load theme from settings on mount
   useEffect(() => {
@@ -31,12 +34,22 @@ function App() {
   const handleBookSelect = (book: Book) => {
     setSelectedBook(book)
     setCurrentView('reader')
+    setTocItems([]) // Reset TOC when switching books
   }
 
   const handleBackToLibrary = () => {
     setCurrentView('library')
     setSelectedBook(null)
+    setTocItems([]) // Clear TOC when going back to library
   }
+
+  const handleTocLoad = useCallback((toc: TocItem[]) => {
+    setTocItems(toc)
+  }, [])
+
+  const handleTocItemClick = useCallback((item: TocItem) => {
+    readerRef.current?.navigateToTocItem(item)
+  }, [])
 
   const toggleTheme = useCallback(() => {
     const newTheme = theme === 'light' ? 'dark' : 'light'
@@ -67,6 +80,8 @@ function App() {
         isOpen={isTocOpen}
         view={currentView}
         book={selectedBook}
+        tocItems={tocItems}
+        onItemClick={handleTocItemClick}
       />
       
       <main className="main-content">
@@ -74,8 +89,10 @@ function App() {
           <LibraryView onBookSelect={handleBookSelect} />
         ) : (
           <ReaderView 
+            ref={readerRef}
             book={selectedBook!}
             onBack={handleBackToLibrary}
+            onTocLoad={handleTocLoad}
           />
         )}
       </main>
@@ -105,4 +122,3 @@ function App() {
 }
 
 export default App
-

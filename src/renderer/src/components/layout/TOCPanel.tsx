@@ -1,31 +1,71 @@
-import { ChevronDownIcon } from '@heroicons/react/24/outline'
-import type { Book } from '@shared/types'
+import { ChevronDownIcon, ChevronRightIcon } from '@heroicons/react/24/outline'
+import { useState } from 'react'
+import type { Book, TocItem } from '@shared/types'
 
 interface TOCPanelProps {
   isOpen: boolean
   view: 'library' | 'reader'
   book: Book | null
+  tocItems: TocItem[]
+  onItemClick?: (item: TocItem) => void
 }
 
-// Placeholder TOC items for demo
-const demoTocItems = [
-  { id: '1', title: 'Title Page', level: 0 },
-  { id: '2', title: 'Copyright Page', level: 0 },
-  { id: '3', title: 'Dedication', level: 0 },
-  { id: '4', title: 'Contents', level: 0 },
-  { id: '5', title: 'List of Abbreviations', level: 0 },
-  { id: '6', title: 'Introducing Henri Bergson', level: 0 },
-  { id: '7', title: '1. Taking Time Seriously', level: 1 },
-  { id: '8', title: '2. Making Memory Matter', level: 1 },
-  { id: '9', title: '3. Elan Vital', level: 1 },
-  { id: '10', title: '4. Open and Closed', level: 1 },
-  { id: '11', title: 'Conclusion', level: 0 },
-  { id: '12', title: 'Notes', level: 0 },
-  { id: '13', title: 'Index', level: 0 },
-]
+// Recursive component for rendering TOC items with children
+function TocItemComponent({ 
+  item, 
+  level = 0, 
+  onItemClick 
+}: { 
+  item: TocItem
+  level?: number
+  onItemClick?: (item: TocItem) => void 
+}) {
+  const [isExpanded, setIsExpanded] = useState(true)
+  const hasChildren = item.children && item.children.length > 0
 
-export function TOCPanel({ isOpen, view, book }: TOCPanelProps) {
+  return (
+    <li className="toc-item-container">
+      <div className={`toc-item level-${level}`}>
+        {hasChildren && (
+          <button 
+            className="toc-expand-btn"
+            onClick={() => setIsExpanded(!isExpanded)}
+            aria-label={isExpanded ? 'Collapse' : 'Expand'}
+          >
+            {isExpanded ? (
+              <ChevronDownIcon className="expand-icon" />
+            ) : (
+              <ChevronRightIcon className="expand-icon" />
+            )}
+          </button>
+        )}
+        <button 
+          className={`toc-item-button ${!hasChildren ? 'no-children' : ''}`}
+          onClick={() => onItemClick?.(item)}
+        >
+          {item.label}
+        </button>
+      </div>
+      {hasChildren && isExpanded && (
+        <ul className="toc-sublist">
+          {item.children!.map((child) => (
+            <TocItemComponent 
+              key={child.id} 
+              item={child} 
+              level={level + 1}
+              onItemClick={onItemClick}
+            />
+          ))}
+        </ul>
+      )}
+    </li>
+  )
+}
+
+export function TOCPanel({ isOpen, view, book, tocItems, onItemClick }: TOCPanelProps) {
   if (!isOpen) return null
+
+  const hasToc = tocItems && tocItems.length > 0
 
   return (
     <aside className="toc-panel">
@@ -40,18 +80,21 @@ export function TOCPanel({ isOpen, view, book }: TOCPanelProps) {
             <p>Select a book to view its table of contents</p>
           </div>
         ) : book ? (
-          <ul className="toc-list">
-            {demoTocItems.map((item) => (
-              <li 
-                key={item.id}
-                className={`toc-item level-${item.level}`}
-              >
-                <button className="toc-item-button">
-                  {item.title}
-                </button>
-              </li>
-            ))}
-          </ul>
+          hasToc ? (
+            <ul className="toc-list">
+              {tocItems.map((item) => (
+                <TocItemComponent 
+                  key={item.id} 
+                  item={item}
+                  onItemClick={onItemClick}
+                />
+              ))}
+            </ul>
+          ) : (
+            <div className="toc-empty">
+              <p>No table of contents available</p>
+            </div>
+          )
         ) : null}
       </nav>
 
@@ -102,30 +145,76 @@ export function TOCPanel({ isOpen, view, book }: TOCPanelProps) {
           font-size: 13px;
         }
         
-        .toc-list {
+        .toc-list,
+        .toc-sublist {
           list-style: none;
+          margin: 0;
+          padding: 0;
         }
         
-        .toc-item {
+        .toc-sublist {
+          margin-left: var(--spacing-sm);
+        }
+        
+        .toc-item-container {
           margin: 2px 0;
         }
         
+        .toc-item {
+          display: flex;
+          align-items: center;
+          gap: 2px;
+        }
+        
         .toc-item.level-1 {
-          padding-left: var(--spacing-md);
+          padding-left: var(--spacing-sm);
         }
         
         .toc-item.level-2 {
-          padding-left: calc(var(--spacing-md) * 2);
+          padding-left: calc(var(--spacing-sm) * 2);
+        }
+        
+        .toc-item.level-3 {
+          padding-left: calc(var(--spacing-sm) * 3);
+        }
+        
+        .toc-expand-btn {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 20px;
+          height: 20px;
+          padding: 0;
+          flex-shrink: 0;
+          border-radius: 4px;
+          color: var(--color-text-muted);
+        }
+        
+        .toc-expand-btn:hover {
+          background-color: var(--color-bg-tertiary);
+          color: var(--color-text-primary);
+        }
+        
+        .expand-icon {
+          width: 12px;
+          height: 12px;
         }
         
         .toc-item-button {
-          width: 100%;
+          flex: 1;
           text-align: left;
-          padding: var(--spacing-sm) var(--spacing-sm);
+          padding: var(--spacing-xs) var(--spacing-sm);
           font-size: 13px;
           color: var(--color-text-secondary);
           border-radius: 4px;
           transition: all var(--transition-fast);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        
+        .toc-item-button.no-children {
+          margin-left: 22px;
         }
         
         .toc-item-button:hover {
@@ -136,4 +225,3 @@ export function TOCPanel({ isOpen, view, book }: TOCPanelProps) {
     </aside>
   )
 }
-

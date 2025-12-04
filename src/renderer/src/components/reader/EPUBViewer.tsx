@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import ePub, { Book, Rendition, Contents } from 'epubjs'
+import type { TocItem } from '@shared/types'
 
 interface EPUBViewerProps {
   filePath: string
@@ -9,20 +10,35 @@ interface EPUBViewerProps {
   onTocLoad?: (toc: TocItem[]) => void
 }
 
-export interface TocItem {
+export interface EPUBViewerRef {
+  goToLocation: (href: string) => void
+}
+
+// epubjs의 NavItem 타입
+interface EpubNavItem {
   id: string
   href: string
   label: string
-  subitems?: TocItem[]
+  subitems?: EpubNavItem[]
 }
 
-export function EPUBViewer({
+// Convert EPUB nav items to our TocItem format
+function convertNavToTocItems(navItems: EpubNavItem[]): TocItem[] {
+  return navItems.map((item, index) => ({
+    id: item.id || `epub-toc-${index}`,
+    label: item.label,
+    href: item.href,
+    children: item.subitems ? convertNavToTocItems(item.subitems) : undefined
+  }))
+}
+
+export const EPUBViewer = forwardRef<EPUBViewerRef, EPUBViewerProps>(function EPUBViewer({
   filePath,
   initialLocation,
   onLocationChange,
   onTextSelect,
   onTocLoad
-}: EPUBViewerProps) {
+}, ref) {
   const viewerRef = useRef<HTMLDivElement>(null)
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
@@ -31,7 +47,16 @@ export function EPUBViewer({
   const [error, setError] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
-  const [currentLocation, setCurrentLocation] = useState<string>('')
+
+  // Navigation function
+  const goToLocation = useCallback((href: string) => {
+    renditionRef.current?.display(href)
+  }, [])
+
+  // Expose goToLocation to parent via ref
+  useImperativeHandle(ref, () => ({
+    goToLocation
+  }), [goToLocation])
 
   // Initialize EPUB
   useEffect(() => {
@@ -54,18 +79,9 @@ export function EPUBViewer({
         // Wait for book to be ready
         await book.ready
 
-        // Get TOC
-        const toc = book.navigation.toc
-        const tocItems: TocItem[] = toc.map((item) => ({
-          id: item.id,
-          href: item.href,
-          label: item.label,
-          subitems: item.subitems?.map((sub) => ({
-            id: sub.id,
-            href: sub.href,
-            label: sub.label
-          }))
-        }))
+        // Get TOC and convert to our format
+        const toc = book.navigation.toc as EpubNavItem[]
+        const tocItems = convertNavToTocItems(toc)
         onTocLoad?.(tocItems)
 
         // Create rendition with two-page spread
@@ -93,7 +109,6 @@ export function EPUBViewer({
         // Handle location changes
         rendition.on('relocated', (location: { start: { cfi: string; displayed: { page: number; total: number } } }) => {
           const { cfi, displayed } = location.start
-          setCurrentLocation(cfi)
           setCurrentPage(displayed.page)
           setTotalPages(displayed.total)
           onLocationChange?.(cfi, displayed.page, displayed.total)
@@ -155,10 +170,6 @@ export function EPUBViewer({
 
   const goToNext = useCallback(() => {
     renditionRef.current?.next()
-  }, [])
-
-  const goToLocation = useCallback((location: string) => {
-    renditionRef.current?.display(location)
   }, [])
 
   // Keyboard navigation
@@ -330,5 +341,4 @@ export function EPUBViewer({
       `}</style>
     </div>
   )
-}
-
+})

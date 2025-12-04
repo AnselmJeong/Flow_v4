@@ -17,6 +17,9 @@ importers:
       epubjs:
         specifier: ^0.3.93
         version: 0.3.93
+      pdfjs-dist:
+        specifier: 4.8.69
+        version: 4.8.69
       react:
         specifier: ^18.2.0
         version: 18.3.1

@@ -36,6 +36,15 @@ export interface Settings {
   model: string
 }
 
+// TOC (Table of Contents) types
+export interface TocItem {
+  id: string
+  label: string
+  pageNumber?: number  // PDF용
+  href?: string        // EPUB용
+  children?: TocItem[]
+}
+
 // IPC Channel names
 export const IPC_CHANNELS = {
   // File operations

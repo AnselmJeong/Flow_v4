@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, forwardRef, useImperativeHandle } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
-import type { DocumentCallback } from 'react-pdf/dist/cjs/shared/types'
+import type { PDFDocumentProxy } from 'pdfjs-dist'
+import type { TocItem } from '@shared/types'
 
 // 1. Worker 설정 (필수) - 로컬 파일 사용 (Electron 앱용)
 pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
@@ -14,17 +15,31 @@ interface PDFViewerProps {
   initialPage?: number
   onPageChange?: (page: number, totalPages: number) => void
   onTextSelect?: (text: string, position: { x: number; y: number }) => void
+  onTocLoad?: (toc: TocItem[]) => void
   twoPageView?: boolean
 }
 
-export function PDFViewer({
+export interface PDFViewerRef {
+  goToPage: (page: number) => void
+}
+
+// PDF outline item 타입
+interface PDFOutlineItem {
+  title: string
+  dest: string | unknown[] | null
+  items?: PDFOutlineItem[]
+}
+
+export const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(function PDFViewer({
   filePath,
   initialPage = 1,
   onPageChange,
   onTextSelect,
+  onTocLoad,
   twoPageView = true
-}: PDFViewerProps) {
+}, ref) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const pdfDocRef = useRef<unknown>(null)
   const [numPages, setNumPages] = useState<number>(0)
   const [currentPage, setCurrentPage] = useState<number>(initialPage)
   const [pageHeight, setPageHeight] = useState<number | undefined>(undefined)
@@ -57,19 +72,6 @@ export function PDFViewer({
     }
   }, [])
 
-  const onDocumentLoadSuccess: DocumentCallback = useCallback(({ numPages: total }) => {
-    setNumPages(total)
-    setLoading(false)
-    setError(null)
-    onPageChange?.(currentPage, total)
-  }, [currentPage, onPageChange])
-
-  const onDocumentLoadError = useCallback((err: Error) => {
-    console.error('PDF load error:', err)
-    setError('PDF 파일을 불러오는데 실패했습니다.')
-    setLoading(false)
-  }, [])
-
   const goToPage = useCallback((page: number) => {
     const validPage = Math.max(1, Math.min(page, numPages))
     // In two-page view, ensure we start on odd page
@@ -77,6 +79,89 @@ export function PDFViewer({
     setCurrentPage(adjustedPage)
     onPageChange?.(adjustedPage, numPages)
   }, [numPages, twoPageView, onPageChange])
+
+  // Expose goToPage to parent via ref
+  useImperativeHandle(ref, () => ({
+    goToPage
+  }), [goToPage])
+
+  // Convert PDF outline to TocItem format
+  const convertOutlineToTocItems = useCallback(async (
+    outline: PDFOutlineItem[], 
+    pdf: { getDestination: (dest: string) => Promise<unknown[]>; getPageIndex: (ref: unknown) => Promise<number> }
+  ): Promise<TocItem[]> => {
+    const result: TocItem[] = []
+    
+    for (let i = 0; i < outline.length; i++) {
+      const item = outline[i]
+      let pageNumber: number | undefined
+
+      try {
+        if (item.dest) {
+          let dest = item.dest
+          // dest can be a string (named destination) or array
+          if (typeof dest === 'string') {
+            dest = await pdf.getDestination(dest)
+          }
+          if (Array.isArray(dest) && dest[0]) {
+            const pageIndex = await pdf.getPageIndex(dest[0])
+            pageNumber = pageIndex + 1 // Convert to 1-based page number
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to get page number for outline item:', item.title, e)
+      }
+
+      const tocItem: TocItem = {
+        id: `pdf-toc-${i}-${item.title}`,
+        label: item.title,
+        pageNumber
+      }
+
+      if (item.items && item.items.length > 0) {
+        tocItem.children = await convertOutlineToTocItems(item.items, pdf)
+      }
+
+      result.push(tocItem)
+    }
+    
+    return result
+  }, [])
+
+  const onDocumentLoadSuccess = useCallback((pdf: PDFDocumentProxy) => {
+    const total = pdf.numPages
+    setNumPages(total)
+    setLoading(false)
+    setError(null)
+    onPageChange?.(currentPage, total)
+    
+    // Store pdf reference for later use
+    pdfDocRef.current = pdf
+
+    // Extract outline (TOC) - use Promise chain instead of async/await
+    pdf.getOutline()
+      .then(async (outline) => {
+        if (outline && outline.length > 0) {
+          const tocItems = await convertOutlineToTocItems(outline as PDFOutlineItem[], pdf as unknown as { 
+            getDestination: (dest: string) => Promise<unknown[]>
+            getPageIndex: (ref: unknown) => Promise<number> 
+          })
+          onTocLoad?.(tocItems)
+        } else {
+          onTocLoad?.([])
+        }
+      })
+      .catch((e) => {
+        console.error('Failed to load PDF outline:', e)
+        onTocLoad?.([])
+      })
+  }, [currentPage, onPageChange, onTocLoad, convertOutlineToTocItems])
+
+  const onDocumentLoadError = useCallback((err: Error) => {
+    console.error('PDF load error:', err)
+    setError('PDF 파일을 불러오는데 실패했습니다.')
+    setLoading(false)
+  }, [])
 
   const goToPrevPage = useCallback(() => {
     goToPage(currentPage - (twoPageView ? 2 : 1))
@@ -390,4 +475,4 @@ export function PDFViewer({
       `}</style>
     </div>
   )
-}
+})

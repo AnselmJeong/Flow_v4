@@ -1,22 +1,48 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef, forwardRef, useImperativeHandle } from 'react'
 import { XMarkIcon } from '@heroicons/react/24/outline'
-import { PDFViewer } from '../components/reader/PDFViewer'
-import { EPUBViewer } from '../components/reader/EPUBViewer'
+import { PDFViewer, EPUBViewer } from '../components/reader'
+import type { PDFViewerRef, EPUBViewerRef } from '../components/reader'
 import { SelectionBubble } from '../components/ui/SelectionBubble'
 import { ChatPanel } from '../components/chat/ChatPanel'
-import type { Book, ChatSession } from '@shared/types'
+import type { Book, ChatSession, TocItem } from '@shared/types'
 
 interface ReaderViewProps {
   book: Book
   onBack: () => void
+  onTocLoad?: (toc: TocItem[]) => void
 }
 
-export function ReaderView({ book, onBack }: ReaderViewProps) {
+export interface ReaderViewRef {
+  navigateToTocItem: (item: TocItem) => void
+}
+
+export const ReaderView = forwardRef<ReaderViewRef, ReaderViewProps>(function ReaderView({ 
+  book, 
+  onBack,
+  onTocLoad
+}, ref) {
+  const pdfViewerRef = useRef<PDFViewerRef>(null)
+  const epubViewerRef = useRef<EPUBViewerRef>(null)
+  
   const [currentPage, setCurrentPage] = useState(book.lastPage || 1)
   const [totalPages, setTotalPages] = useState(book.totalPages || 0)
   const [selectedSession, setSelectedSession] = useState<ChatSession | null>(null)
   const [chatInput, setChatInput] = useState('')
   const [selectedText, setSelectedText] = useState<{ text: string; position: { x: number; y: number } } | null>(null)
+
+  // Navigate to TOC item
+  const navigateToTocItem = useCallback((item: TocItem) => {
+    if (book.fileType === 'pdf' && item.pageNumber) {
+      pdfViewerRef.current?.goToPage(item.pageNumber)
+    } else if (book.fileType === 'epub' && item.href) {
+      epubViewerRef.current?.goToLocation(item.href)
+    }
+  }, [book.fileType])
+
+  // Expose navigation function to parent
+  useImperativeHandle(ref, () => ({
+    navigateToTocItem
+  }), [navigateToTocItem])
 
   const handlePageChange = useCallback((page: number, total: number) => {
     setCurrentPage(page)
@@ -28,6 +54,10 @@ export function ReaderView({ book, onBack }: ReaderViewProps) {
   const handleTextSelect = useCallback((text: string, position: { x: number; y: number }) => {
     setSelectedText({ text, position })
   }, [])
+
+  const handleTocLoad = useCallback((toc: TocItem[]) => {
+    onTocLoad?.(toc)
+  }, [onTocLoad])
 
   const handleSummarize = useCallback(async (text: string) => {
     const session = await window.api.createChatSession(book.id, text)
@@ -83,17 +113,21 @@ export function ReaderView({ book, onBack }: ReaderViewProps) {
         <div className="reader-content">
           {book.fileType === 'pdf' ? (
             <PDFViewer
+              ref={pdfViewerRef}
               filePath={book.filePath}
               initialPage={currentPage}
               onPageChange={handlePageChange}
               onTextSelect={handleTextSelect}
+              onTocLoad={handleTocLoad}
               twoPageView={true}
             />
           ) : book.fileType === 'epub' ? (
             <EPUBViewer
+              ref={epubViewerRef}
               filePath={book.filePath}
               onLocationChange={(_, page, total) => handlePageChange(page, total)}
               onTextSelect={handleTextSelect}
+              onTocLoad={handleTocLoad}
             />
           ) : (
             <div className="reader-placeholder">
@@ -231,4 +265,4 @@ export function ReaderView({ book, onBack }: ReaderViewProps) {
       `}</style>
     </div>
   )
-}
+})
